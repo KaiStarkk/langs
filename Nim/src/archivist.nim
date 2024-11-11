@@ -1,5 +1,5 @@
 # =========== IMPORTS ============
-import os, strutils, httpclient, json, uri, re
+import os, strutils, httpclient, json, re
 
 # ========== CONSTANTS ===========
 let ROOT_DIR = "/mnt/rust/books/Brandon Sanderson/"
@@ -7,6 +7,7 @@ let CD_PATTERN = re"^(CD|Disc|Part)[\S._-]?\d{1,3}$"
 
 # ============ TYPES =============
 type
+
   DirNode = ref object
     path: string
     parent: DirNode
@@ -22,19 +23,28 @@ type
     approved: bool
 
 # ============ UTILS =============
-proc `$`(node: DirNode): string = result = node.path
+proc printDirNode(self: DirNode; indent: int = 0) =
+  echo "   ".repeat(indent) & "\\__" & splitPath(self.path).tail
+  for child in self.children: printDirNode child, indent + 1
 
-proc printDirNode(node: DirNode; indent: int = 0) =
-  echo repeat("   ", indent) & "\\__" & splitPath(node.path).tail
-  for child in node.children: printDirNode(child, indent + 1)
-
-proc matchesCDPattern(node: DirNode): bool = return splitPath(node.path).tail.match(CD_PATTERN)
+proc isCDDir(node: DirNode): bool = return splitPath(node.path).tail.match(CD_PATTERN)
 
 proc isLeafDir(node: DirNode): bool =
-  if node.info.kind != pcDir or matchesCDPattern(node): return false
+  if node.info.kind != pcDir or isCDDir node: return false
   for child in node.children: 
-    if child.info.kind == pcDir and not matchesCDPattern(child): return false
+    if child.info.kind == pcDir and not isCDDir child: return false
   return true
+
+proc lookup(self: DirNode): Book =
+  # TODO: Likely need to formal uri, removing '-' and spaces, etc. Check URI module.
+  let query = self.path[ROOT_DIR.len..^1].replace("/", " ").replace(re" Book \d*\.*\d*")
+  let url = "https://www.googleapis.com/books/v1/volumes?maxResults=1&q=$#" % query
+  echo url
+  let response = newHttpClient().getContent(url)
+  # let data = parseJson response
+  echo response
+  sleep 4
+  assert(2==3)
 
 # ============ PROCS =============
 proc readDir(path: string, parent: DirNode = nil): DirNode =
@@ -54,22 +64,9 @@ proc leaves(self: DirNode): seq[DirNode] =
   if isLeafDir(self): result.add(self)
   for child in self.children: result.add(child.leaves())
 
-# TODO: Adapt this into matchBooks(seq[DirNode]): seq[Book] =
-proc matchBooks(author, title: string, apiKey: string): JsonNode =
-  let client = newHttpClient()
-  var query = ""
-  if author.len > 0: query &= "inauthor:" & author & " "
-  if title.len > 0: query &= "intitle:" & title & " "
-  query = query.strip()
-  let encodedQuery = encodeUrl(query)
-  let url = "https://www.googleapis.com/books/v1/volumes?q=" & encodedQuery & "&key=" & apiKey
-  try:
-    let response = client.getContent(url)
-    let jsonData = parseJson(response)
-    return jsonData
-  except:
-    echo "Error fetching data from Google Books API."
-    return %*{}
+proc match(self: seq[DirNode]): seq[Book] =
+  for node in self:
+    result.add lookup node
 
 proc mapPaths(): auto = discard
 
@@ -79,7 +76,9 @@ proc extractBookNames(path: string): string = result = splitPath(path).tail.repl
 
 # ============ MAIN ==============
 proc main() =
-  let tree = readDir(ROOT_DIR)
-  echo tree.leaves()
+  let tree = readDir ROOT_DIR
+  let leaves = leaves tree
+  let matches = match leaves
 
 if isMainModule: main()
+
